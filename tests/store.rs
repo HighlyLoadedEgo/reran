@@ -81,11 +81,11 @@ fn eviction_keeps_newest_10k_idempotent() {
 fn stats_sum_events() {
     let (_d, p) = temp_db();
     let store = Store::open(&p).unwrap();
-    store.record_event("hit", 120).unwrap();
-    store.record_event("hit", 80).unwrap();
-    store.record_event("miss", 0).unwrap();
-    store.record_event("bypass", 0).unwrap();
-    store.record_event("uncached_failure", 0).unwrap();
+    store.record_event("hit", 120, "git status").unwrap();
+    store.record_event("hit", 80, "git log").unwrap();
+    store.record_event("miss", 0, "npm test").unwrap();
+    store.record_event("bypass", 0, "touch x").unwrap();
+    store.record_event("uncached_failure", 0, "false").unwrap();
     let s = store.stats().unwrap();
     assert_eq!(s.hits, 2);
     assert_eq!(s.misses, 1);
@@ -99,8 +99,8 @@ fn concurrent_opens_wal() {
     let (_d, p) = temp_db();
     let s1 = Store::open(&p).unwrap();
     let s2 = Store::open(&p).unwrap();
-    s1.record_event("hit", 1).unwrap();
-    s2.record_event("miss", 0).unwrap();
+    s1.record_event("hit", 1, "git status").unwrap();
+    s2.record_event("miss", 0, "npm test").unwrap();
     assert_eq!(s1.stats().unwrap().hits, 1);
 }
 

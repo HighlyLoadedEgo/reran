@@ -157,7 +157,7 @@ fn f8_gain_shows_no_exit_code_count() {
     let d = tempfile::tempdir().unwrap();
     let db = d.path().join("t.db");
     let store = Store::open(&db).unwrap();
-    store.record_event("no_exit_code", 0).unwrap();
+    store.record_event("no_exit_code", 0, "git status").unwrap();
     Command::cargo_bin("reran")
         .unwrap()
         .env("RERAN_DB", &db)

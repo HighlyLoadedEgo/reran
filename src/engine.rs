@@ -36,7 +36,7 @@ pub fn evaluate(store: &Store, argv: &[String], cwd: &Path, session: &str) -> Ou
         return Outcome::Bypass;
     }
     if classify(argv) == Class::Bypass {
-        let _ = store.record_event("bypass", 0);
+        let _ = store.record_event("bypass", 0, &label_for(argv));
         return Outcome::Bypass;
     }
     let (key, _ctx) = make_key(store, argv, cwd);
@@ -48,11 +48,11 @@ pub fn evaluate(store: &Store, argv: &[String], cwd: &Path, session: &str) -> Ou
             let digest = render_hit(&e);
             let saved = estimate_tokens(&String::from_utf8_lossy(&e.raw))
                 .saturating_sub(estimate_tokens(&digest));
-            let _ = store.record_event("hit", saved);
+            let _ = store.record_event("hit", saved, &label_for(argv));
             Outcome::Hit { digest }
         }
         None => {
-            let _ = store.record_event("miss", 0);
+            let _ = store.record_event("miss", 0, &label_for(argv));
             Outcome::Miss
         }
     }
@@ -79,11 +79,11 @@ pub fn record(store: &Store, argv: &[String], cwd: &Path, session: &str, raw: &s
         return;
     }
     if raw.len() > MAX_CACHED_OUTPUT_BYTES {
-        let _ = store.record_event("uncached_failure", 0);
+        let _ = store.record_event("oversized_skipped", 0, &label_for(argv));
         return;
     }
     if exit_code != 0 {
-        let _ = store.record_event("uncached_failure", 0); // bash-cache#25: failures never cached
+        let _ = store.record_event("uncached_failure", 0, &label_for(argv)); // bash-cache#25
         return;
     }
     let (key, _ctx) = make_key(store, argv, cwd);
@@ -119,6 +119,11 @@ pub fn record(store: &Store, argv: &[String], cwd: &Path, session: &str, raw: &s
     let _ = store.put(&e);
     let _ = store.record_seen(session, &key, line_count(&e.raw));
     let _ = lock_file.unlock();
+}
+
+/// Short human label for stats/history: `git status`, `cat a[..]`.
+fn label_for(argv: &[String]) -> String {
+    argv.join(" ")
 }
 
 fn hex(bytes: &[u8]) -> String {

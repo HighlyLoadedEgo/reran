@@ -65,9 +65,12 @@ impl Store {
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind         TEXT NOT NULL,
                 tokens_saved INTEGER NOT NULL DEFAULT 0,
-                ts           INTEGER NOT NULL
+                ts           INTEGER NOT NULL,
+                label        TEXT NOT NULL DEFAULT ''
             );",
         )?;
+        // migration for dbs created before the label column (M1 pre-release only)
+        let _ = conn.execute("ALTER TABLE events ADD COLUMN label TEXT NOT NULL DEFAULT ''", []);
         Ok(Store { conn, cache_dir })
     }
 
@@ -144,16 +147,50 @@ impl Store {
         )
     }
 
-    pub fn record_event(&self, kind: &str, tokens_saved: u64) -> rusqlite::Result<()> {
+    pub fn record_event(&self, kind: &str, tokens_saved: u64, label: &str) -> rusqlite::Result<()> {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        let label: String = label.chars().take(60).collect();
         self.conn.execute(
-            "INSERT INTO events (kind, tokens_saved, ts) VALUES (?1, ?2, ?3)",
-            params![kind, tokens_saved, ts],
+            "INSERT INTO events (kind, tokens_saved, ts, label) VALUES (?1, ?2, ?3, ?4)",
+            params![kind, tokens_saved, ts, label],
         )?;
         Ok(())
+    }
+
+    /// Top commands by tokens saved (hits only) — `reran gain` "By command".
+    pub fn top_labels(&self, limit: usize) -> rusqlite::Result<Vec<(String, u64, u64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT label, COUNT(*), SUM(tokens_saved) FROM events
+             WHERE kind = 'hit' AND label != ''
+             GROUP BY label ORDER BY SUM(tokens_saved) DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, Option<u64>>(2)?.unwrap_or(0),
+            ))
+        })?;
+        rows.collect()
+    }
+
+    /// Most recent events, newest first — `reran gain --history`.
+    /// Returns (kind, tokens_saved, label) triples.
+    pub fn recent_events(&self, limit: usize) -> rusqlite::Result<Vec<(String, u64, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, tokens_saved, label FROM events ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.collect()
     }
 
     pub fn stats(&self) -> rusqlite::Result<Stats> {

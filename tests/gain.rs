@@ -40,8 +40,12 @@ fn gain_prints_honest_stats() {
         .stdout(predicate::str::contains("misses 1"))
         .stdout(predicate::str::contains("bypass 1"))
         .stdout(predicate::str::contains("uncached failures 1"))
-        .stdout(predicate::str::contains("tokens saved:"))
-        .stdout(predicate::str::contains("hit rate:"));
+        .stdout(predicate::str::contains("Tokens saved:"))
+        .stdout(predicate::str::contains("Hit rate:"))
+        // rtk-style extras
+        .stdout(predicate::str::contains("█"))
+        .stdout(predicate::str::contains("By command"))
+        .stdout(predicate::str::contains("git status"));
 }
 
 #[test]
@@ -56,5 +60,46 @@ fn gain_zero_state_no_crash() {
         .assert()
         .success()
         .stdout(predicate::str::contains("hits 0"))
-        .stdout(predicate::str::contains("hit rate: 0.0%"));
+        .stdout(predicate::str::contains("Hit rate:"))
+        .stdout(predicate::str::contains("0.0%"));
+}
+
+#[test]
+fn gain_history_shows_recent_events_with_labels() {
+    let dbd = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let db = dbd.path().join("t.db");
+    let store = Store::open(&db).unwrap();
+    let cwd = cwd.path();
+
+    let cmd: Vec<String> = ["git", "status"].iter().map(|s| s.to_string()).collect();
+    record(&store, &cmd, cwd, "s1", "branch state, fairly long output for savings", 0);
+    assert!(matches!(evaluate(&store, &cmd, cwd, "s1"), Outcome::Hit { .. }));
+
+    // a miss from the same session so history shows both kinds
+    let diff: Vec<String> = ["git", "diff"].iter().map(|s| s.to_string()).collect();
+    assert!(matches!(evaluate(&store, &diff, cwd, "s1"), Outcome::Miss));
+
+    Command::cargo_bin("reran")
+        .unwrap()
+        .env("RERAN_DB", &db)
+        .args(["gain", "--history"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("git status"))
+        .stdout(predicate::str::contains("hit"))
+        .stdout(predicate::str::contains("miss"));
+}
+
+#[test]
+fn event_labels_are_truncated_to_60_chars() {
+    let dbd = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let store = Store::open(&dbd.path().join("t.db")).unwrap();
+    let cwd = cwd.path();
+    let long_label = format!("cat {}", "a".repeat(200));
+    store.record_event("hit", 100, &long_label).unwrap();
+    let recent = store.recent_events(5).unwrap();
+    assert_eq!(recent.len(), 1);
+    assert!(recent[0].2.chars().count() <= 60, "{}", recent[0].2);
 }

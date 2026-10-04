@@ -86,10 +86,10 @@ pub fn hook_post(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String 
         match confirmable_exit(&payload.tool_response) {
             Some(0) => record(store, &argv, cwd, &payload.session_id, output, 0),
             Some(_) => {
-                let _ = store.record_event("uncached_failure", 0); // never cached
+                let _ = store.record_event("uncached_failure", 0, &argv.join(" ")); // never cached
             }
             None => {
-                let _ = store.record_event("no_exit_code", 0);
+                let _ = store.record_event("no_exit_code", 0, &argv.join(" "));
             }
         }
         Some(String::new())
