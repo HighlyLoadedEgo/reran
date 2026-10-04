@@ -1,0 +1,15 @@
+{
+  "name": "reran",
+  "version": "0.1.0",
+  "description": "Your agent already ran that. reran remembers. Memoization + output extraction for AI coding agents.",
+  "bin": { "reran": "bin/reran.js" },
+  "optionalDependencies": {
+    "@reran/darwin-arm64": "0.1.0",
+    "@reran/darwin-x64": "0.1.0",
+    "@reran/linux-arm64": "0.1.0",
+    "@reran/linux-x64": "0.1.0"
+  },
+  "files": ["bin/"],
+  "license": "MIT",
+  "repository": "https://github.com/HighlyLoadedEgo/reran"
+}

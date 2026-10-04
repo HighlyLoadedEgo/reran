@@ -38,9 +38,21 @@ pub fn line_count(raw: &[u8]) -> u64 {
     n
 }
 
+/// Wrap a stored digest with the hit line. Legacy entries (pre-M2, empty digest)
+/// fall back to the lines/tokens form.
+pub fn finalize_digest(turn: u64, inner: &str) -> String {
+    if inner.is_empty() {
+        return format!("reran: unchanged since turn {turn}");
+    }
+    format!("reran: unchanged since turn {turn} · {inner}")
+}
+
 /// Render a cache hit. NEVER called for failed commands (engine guarantees exit 0),
 /// and even then the wording contains no success vocabulary (false-green tripwire).
 pub fn render_hit(e: &Entry) -> String {
+    if !e.digest.is_empty() {
+        return finalize_digest(e.turn, &e.digest);
+    }
     let lines = line_count(&e.raw);
     let tokens = estimate_tokens(&String::from_utf8_lossy(&e.raw));
     format!(

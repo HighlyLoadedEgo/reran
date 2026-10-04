@@ -87,8 +87,8 @@ pub fn record(store: &Store, argv: &[String], cwd: &Path, session: &str, raw: &s
         return;
     }
     let (key, _ctx) = make_key(store, argv, cwd);
-    let lock_path = marker_path(store.cache_dir(), cwd)
-        .with_file_name(format!("{}.lock", hex(&key)));
+    // one lock per cwd (F9: per-key lock files accumulate forever)
+    let lock_path = marker_path(store.cache_dir(), cwd).with_extension("lock");
     let _ = fs::create_dir_all(lock_path.parent().unwrap());
     let lock_file = match fs::OpenOptions::new()
         .create(true)
@@ -108,7 +108,7 @@ pub fn record(store: &Store, argv: &[String], cwd: &Path, session: &str, raw: &s
         key,
         session_id: session.to_string(),
         turn,
-        digest: String::new(),
+        digest: crate::extract::digest_raw(argv, raw, exit_code),
         raw: raw.as_bytes().to_vec(),
         exit_code,
         created_at: std::time::SystemTime::now()
@@ -121,11 +121,34 @@ pub fn record(store: &Store, argv: &[String], cwd: &Path, session: &str, raw: &s
     let _ = lock_file.unlock();
 }
 
+/// One-line human explanation of what a call WOULD do and why (doit#329).
+pub fn explain_line(store: &Store, argv: &[String], cwd: &Path, session: &str) -> String {
+    if argv.is_empty() {
+        return "empty command".into();
+    }
+    let class = classify(argv);
+    if class == Class::Bypass {
+        return format!("bypass: write/unknown command ({}), runs raw every time", argv.join(" "));
+    }
+    let (key, ctx) = make_key(store, argv, cwd);
+    let key_hex: String = key.iter().take(8).map(|b| format!("{b:02x}")).collect();
+    match store.get(&key) {
+        Ok(Some(e)) => {
+            let seen = store.saw_whole(session, &key, crate::digest::line_count(&e.raw)).unwrap_or(false);
+            if seen {
+                format!("hit: entry exists and session saw it · memoizable · key={key_hex} epoch={}", ctx.fs_epoch)
+            } else {
+                format!("miss: entry exists but this session never saw its output (runs fresh) · memoizable · key={key_hex} epoch={}", ctx.fs_epoch)
+            }
+        }
+        Ok(None) => format!("miss: no entry for this key (will run and be cached) · memoizable · key={key_hex} epoch={}", ctx.fs_epoch),
+        Err(err) => format!("store error: {err} — runs fresh (fail-open)"),
+    }
+}
+
 /// Short human label for stats/history: `git status`, `cat a[..]`.
 fn label_for(argv: &[String]) -> String {
     argv.join(" ")
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
+

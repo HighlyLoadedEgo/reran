@@ -2,6 +2,7 @@
 pub mod classify;
 pub mod digest;
 pub mod engine;
+pub mod extract;
 pub mod fsepoch;
 pub mod hooks;
 pub mod initcmd;

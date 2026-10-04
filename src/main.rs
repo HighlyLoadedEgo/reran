@@ -22,6 +22,12 @@ enum Cmd {
         #[arg(long)]
         history: bool,
     },
+    /// Explain what reran would do with this command and why
+    Explain {
+        /// The command words (passed after --)
+        #[arg(last = true)]
+        command: Vec<String>,
+    },
 }
 
 fn main() {
@@ -30,8 +36,27 @@ fn main() {
         Cmd::Hook { event } => run_hook(&event),
         Cmd::Init { harness } => run_init(&harness),
         Cmd::Gain { history } => run_gain(history),
+        Cmd::Explain { command } => run_explain(command),
     };
     std::process::exit(code);
+}
+
+fn run_explain(command: Vec<String>) -> i32 {
+    if command.is_empty() {
+        eprintln!("reran explain: pass a command after -- (e.g. reran explain -- git status)");
+        return 1;
+    }
+    match reran::store::Store::open(&reran::store::Store::default_db_path()) {
+        Ok(store) => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            println!("{}", reran::engine::explain_line(&store, &command, &cwd, "explain-probe"));
+            0
+        }
+        Err(e) => {
+            eprintln!("reran explain: {e}");
+            1
+        }
+    }
 }
 
 fn bar(rate_pct: f64, width: usize) -> String {
@@ -133,6 +158,27 @@ fn format_number(n: u64) -> String {
 
 fn run_init(harness: &str) -> i32 {
     match harness {
+        "zcode" => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            let cfg = std::path::Path::new(&home)
+                .join(".zcode")
+                .join("cli")
+                .join("config.json");
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.to_str().map(String::from))
+                .unwrap_or_else(|| "reran".into());
+            match reran::initcmd::init_zcode(&cfg, &bin) {
+                Ok(()) => {
+                    println!("wired reran hooks into {} (takes effect in NEW sessions)", cfg.display());
+                    0
+                }
+                Err(e) => {
+                    eprintln!("reran init: {e}");
+                    1
+                }
+            }
+        }
         "claude-code" => {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             let settings = std::path::Path::new(&home)
@@ -154,7 +200,7 @@ fn run_init(harness: &str) -> i32 {
             }
         }
         other => {
-            eprintln!("reran init: unknown harness {other:?} (supported: claude-code)");
+            eprintln!("reran init: unknown harness {other:?} (supported: claude-code, zcode)");
             1
         }
     }

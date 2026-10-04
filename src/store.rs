@@ -157,6 +157,13 @@ impl Store {
             "INSERT INTO events (kind, tokens_saved, ts, label) VALUES (?1, ?2, ?3, ?4)",
             params![kind, tokens_saved, ts, label],
         )?;
+        // F9 hygiene: keep the newest 10_000 events, idempotent
+        self.conn.execute(
+            "DELETE FROM events WHERE id NOT IN (
+                SELECT id FROM events ORDER BY id DESC LIMIT 10000
+            )",
+            [],
+        )?;
         Ok(())
     }
 
