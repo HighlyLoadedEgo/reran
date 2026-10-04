@@ -2,3 +2,4 @@
 pub mod classify;
 pub mod fsepoch;
 pub mod key;
+pub mod store;
