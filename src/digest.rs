@@ -1,0 +1,50 @@
+use crate::store::Entry;
+
+pub const HEAD_LINES: usize = 20;
+pub const TAIL_LINES: usize = 20;
+
+/// head + tail with an explicit, machine-countable elision marker (spec §5.3:
+/// every elision is explicit). Short inputs pass through verbatim.
+pub fn elide(raw: &str, head: usize, tail: usize) -> String {
+    let lines: Vec<&str> = raw.lines().collect();
+    let n = lines.len();
+    if n <= head + tail {
+        return raw.to_string();
+    }
+    let elided = n - head - tail;
+    let mut out: Vec<String> = Vec::with_capacity(head + tail + 1);
+    for l in &lines[..head] {
+        out.push((*l).to_string());
+    }
+    out.push(format!("[+{elided} lines elided by reran]"));
+    for l in &lines[n - tail..] {
+        out.push((*l).to_string());
+    }
+    out.join("\n")
+}
+
+pub fn estimate_tokens(s: &str) -> u64 {
+    s.len() as u64 / 4
+}
+
+pub fn line_count(raw: &[u8]) -> u64 {
+    if raw.is_empty() {
+        return 0;
+    }
+    let mut n = raw.iter().filter(|&&b| b == b'\n').count() as u64;
+    if *raw.last().unwrap() != b'\n' {
+        n += 1;
+    }
+    n
+}
+
+/// Render a cache hit. NEVER called for failed commands (engine guarantees exit 0),
+/// and even then the wording contains no success vocabulary (false-green tripwire).
+pub fn render_hit(e: &Entry) -> String {
+    let lines = line_count(&e.raw);
+    let tokens = estimate_tokens(&String::from_utf8_lossy(&e.raw));
+    format!(
+        "reran: unchanged since turn {} · {lines} lines, ~{tokens} tokens",
+        e.turn
+    )
+}
