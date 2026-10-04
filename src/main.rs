@@ -24,9 +24,39 @@ fn main() {
     let cli = Cli::parse();
     let code = match cli.cmd {
         Cmd::Hook { event } => run_hook(&event),
-        Cmd::Init { .. } | Cmd::Gain => 0,
+        Cmd::Init { harness } => run_init(&harness),
+        Cmd::Gain => 0,
     };
     std::process::exit(code);
+}
+
+fn run_init(harness: &str) -> i32 {
+    match harness {
+        "claude-code" => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            let settings = std::path::Path::new(&home)
+                .join(".claude")
+                .join("settings.json");
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.to_str().map(String::from))
+                .unwrap_or_else(|| "reran".into());
+            match reran::initcmd::init_claude_code(&settings, &bin) {
+                Ok(()) => {
+                    println!("wired reran hooks into {}", settings.display());
+                    0
+                }
+                Err(e) => {
+                    eprintln!("reran init: {e}");
+                    1
+                }
+            }
+        }
+        other => {
+            eprintln!("reran init: unknown harness {other:?} (supported: claude-code)");
+            1
+        }
+    }
 }
 
 /// Hook entry: read payload from stdin, answer on stdout. Fail-open to exit 0:
