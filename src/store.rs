@@ -25,6 +25,7 @@ pub struct Stats {
 
 pub struct Store {
     conn: Connection,
+    cache_dir: PathBuf,
 }
 
 impl Store {
@@ -32,10 +33,17 @@ impl Store {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
+        let cache_dir = path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_millis(5000))?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // WAL is persistent: only the first connection can flip the mode, and that
+        // switch does NOT honor the busy handler — later openers may hit immediate
+        // SQLITE_BUSY here. The mode already being WAL makes failure harmless.
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS entries (
                 key        BLOB PRIMARY KEY,
@@ -59,7 +67,12 @@ impl Store {
                 ts           INTEGER NOT NULL
             );",
         )?;
-        Ok(Store { conn })
+        Ok(Store { conn, cache_dir })
+    }
+
+    /// Marker/marker-lock root — next to the DB (tests point RERAN-less temp DBs here).
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
     }
 
     pub fn get(&self, key: &[u8; 32]) -> rusqlite::Result<Option<Entry>> {
@@ -119,6 +132,15 @@ impl Store {
             )
             .optional()?;
         Ok(seen.is_some_and(|s| s >= lines))
+    }
+
+    /// Monotonic per-session counter: distinct cached commands so far.
+    pub fn session_turn(&self, session: &str) -> rusqlite::Result<u64> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM seen WHERE session_id = ?1",
+            params![session],
+            |row| row.get(0),
+        )
     }
 
     pub fn record_event(&self, kind: &str, tokens_saved: u64) -> rusqlite::Result<()> {
