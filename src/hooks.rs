@@ -83,13 +83,20 @@ pub fn hook_post(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String 
             .get("stdout")
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let label = argv.join(" ");
+        if !clearly_completed(&payload.tool_response) {
+            // cancelled / timedOut / status != completed: even exitCode 0 here is
+            // NOT a success — caching it would serve interrupted work as done.
+            let _ = store.record_event("not_completed", 0, &label);
+            return Some(String::new());
+        }
         match confirmable_exit(&payload.tool_response) {
             Some(0) => record(store, &argv, cwd, &payload.session_id, output, 0),
             Some(_) => {
-                let _ = store.record_event("uncached_failure", 0, &argv.join(" ")); // never cached
+                let _ = store.record_event("uncached_failure", 0, &label); // never cached
             }
             None => {
-                let _ = store.record_event("no_exit_code", 0, &argv.join(" "));
+                let _ = store.record_event("no_exit_code", 0, &label);
             }
         }
         Some(String::new())
@@ -98,8 +105,24 @@ pub fn hook_post(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String 
     .unwrap_or_default()
 }
 
+/// Trust gate: the run must be unambiguously completed. Any cancellation,
+/// timeout, or non-completed status → false, regardless of exit code.
+fn clearly_completed(tool_response: &serde_json::Value) -> bool {
+    for field in ["cancelled", "timedOut", "timed_out", "interrupted", "isInterrupt"] {
+        if tool_response.get(field).and_then(|v| v.as_bool()) == Some(true) {
+            return false;
+        }
+    }
+    match tool_response.get("status") {
+        Some(serde_json::Value::String(s)) => s == "completed",
+        None | Some(serde_json::Value::Null) => true, // field absent: no signal
+        Some(_) => true,                              // non-string status: not our signal
+    }
+}
+
 fn confirmable_exit(tool_response: &serde_json::Value) -> Option<i32> {
-    for field in ["exit_code", "exitCode", "code", "status"] {
+    // NB: "status" deliberately NOT here — ZCode uses it for the run state string.
+    for field in ["exit_code", "exitCode", "code"] {
         if let Some(v) = tool_response.get(field).and_then(|v| v.as_i64()) {
             return Some(v as i32);
         }

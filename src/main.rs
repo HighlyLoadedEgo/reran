@@ -94,11 +94,11 @@ fn run_gain(history: bool) -> i32 {
             println!();
             println!(
                 "Total commands:    {} (hits {hits} · misses {misses} · bypass {} · uncached failures {})",
-                hits + misses + s.bypass + s.uncached_failures + s.no_exit_code,
+                hits + misses + s.bypass + s.uncached_failures + s.no_exit_code + s.not_completed,
                 s.bypass,
                 s.uncached_failures
             );
-            println!("  no exit code {} (payload had no confirmable exit — not cached)", s.no_exit_code);
+            println!("  no exit code {} · not completed {} (cancelled/timed out — never cached)", s.no_exit_code, s.not_completed);
             println!(
                 "Tokens saved:      {} (counted only on replaced output, bytes/4)",
                 format_number(s.tokens_saved)

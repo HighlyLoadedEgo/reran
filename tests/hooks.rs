@@ -118,3 +118,69 @@ fn post_with_nonzero_exit_never_caches() {
     let out = hook_pre(&pre_payload("git status", "s1"), &cwd, Some(&s));
     assert_eq!(out, "");
 }
+
+// ── ZCode live-payload format (probe 2026-10-05): exitCode camelCase +
+// trust fields. Cancelled/timedOut/not-completed must NEVER cache even
+// when exitCode == 0 — a cancelled command is not a success (spec §5.2).
+fn zcode_payload(cmd: &str, session: &str, stdout: &str, exit_code: i64, extra: serde_json::Value) -> String {
+    let mut resp = serde_json::json!({
+        "stdout": stdout,
+        "stderr": "",
+        "exitCode": exit_code,
+        "status": "completed",
+        "cancelled": false,
+        "timedOut": false
+    });
+    if let (Some(dst), Some(src)) = (resp.as_object_mut(), extra.as_object()) {
+        for (k, v) in src {
+            dst.insert(k.clone(), v.clone());
+        }
+    }
+    serde_json::json!({
+        "session_id": session,
+        "tool_name": "Bash",
+        "tool_input": { "command": cmd },
+        "tool_response": resp
+    })
+    .to_string()
+}
+
+#[test]
+fn zcode_payload_caches_when_completed() {
+    let (_d, s, cwd) = store();
+    hook_post(&zcode_payload("git status", "s1", "On branch main", 0, serde_json::json!({})), &cwd, Some(&s));
+    let out = hook_pre(&pre_payload("git status", "s1"), &cwd, Some(&s));
+    assert!(out.contains("unchanged since turn"), "ZCode exitCode 0 must cache: {out}");
+}
+
+#[test]
+fn zcode_cancelled_is_never_cached() {
+    let (_d, s, cwd) = store();
+    hook_post(&zcode_payload("git status", "s1", "partial output", 0, serde_json::json!({"cancelled": true})), &cwd, Some(&s));
+    let out = hook_pre(&pre_payload("git status", "s1"), &cwd, Some(&s));
+    assert_eq!(out, "", "cancelled with exit 0 must not cache: {out}");
+}
+
+#[test]
+fn zcode_timed_out_is_never_cached() {
+    let (_d, s, cwd) = store();
+    hook_post(&zcode_payload("git status", "s1", "", 0, serde_json::json!({"timedOut": true})), &cwd, Some(&s));
+    let out = hook_pre(&pre_payload("git status", "s1"), &cwd, Some(&s));
+    assert_eq!(out, "", "timedOut must not cache: {out}");
+}
+
+#[test]
+fn zcode_status_not_completed_is_never_cached() {
+    let (_d, s, cwd) = store();
+    hook_post(&zcode_payload("git status", "s1", "", 0, serde_json::json!({"status": "failed"})), &cwd, Some(&s));
+    let out = hook_pre(&pre_payload("git status", "s1"), &cwd, Some(&s));
+    assert_eq!(out, "", "status != completed must not cache: {out}");
+}
+
+#[test]
+fn zcode_nonzero_exitcode_is_never_cached() {
+    let (_d, s, cwd) = store();
+    hook_post(&zcode_payload("git status", "s1", "fatal:", 128, serde_json::json!({})), &cwd, Some(&s));
+    let out = hook_pre(&pre_payload("git status", "s1"), &cwd, Some(&s));
+    assert_eq!(out, "");
+}

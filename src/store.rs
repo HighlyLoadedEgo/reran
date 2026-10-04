@@ -21,6 +21,7 @@ pub struct Stats {
     pub bypass: u64,
     pub uncached_failures: u64,
     pub no_exit_code: u64,
+    pub not_completed: u64,
     pub tokens_saved: u64,
 }
 
@@ -223,6 +224,7 @@ impl Store {
                 "bypass" => s.bypass = count,
                 "uncached_failure" => s.uncached_failures = count,
                 "no_exit_code" => s.no_exit_code = count,
+                "not_completed" => s.not_completed = count,
                 _ => {}
             }
         }
