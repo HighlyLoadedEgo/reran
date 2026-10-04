@@ -25,9 +25,50 @@ fn main() {
     let code = match cli.cmd {
         Cmd::Hook { event } => run_hook(&event),
         Cmd::Init { harness } => run_init(&harness),
-        Cmd::Gain => 0,
+        Cmd::Gain => run_gain(),
     };
     std::process::exit(code);
+}
+
+fn run_gain() -> i32 {
+    match reran::store::Store::open(&reran::store::Store::default_db_path()) {
+        Ok(store) => {
+            let s = store.stats().unwrap_or_default();
+            let hits = s.hits;
+            let misses = s.misses;
+            let bypass = s.bypass;
+            let fails = s.uncached_failures;
+            let rate = if hits + misses > 0 {
+                (hits as f64 / (hits + misses) as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!("reran gain");
+            println!("  hits {hits} · misses {misses} · bypass {bypass} · uncached failures {fails}");
+            println!(
+                "  tokens saved: {} (counted only on replaced output, bytes/4)",
+                format_number(s.tokens_saved)
+            );
+            println!("  hit rate: {rate:.1}%");
+            0
+        }
+        Err(e) => {
+            eprintln!("reran gain: {e}");
+            1
+        }
+    }
+}
+
+fn format_number(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn run_init(harness: &str) -> i32 {
