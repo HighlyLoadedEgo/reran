@@ -9,7 +9,7 @@ fn read_prefixes_are_memoizable() {
     for cmd in [
         vec!["git", "status"],
         vec!["git", "log", "-5"],
-        vec!["git", "diff", "HEAD~1"],
+        vec!["git", "diff", "--stat"],
         vec!["ls", "-la"],
         vec!["cat", "README.md"],
         vec!["grep", "-r", "todo", "."],
@@ -38,6 +38,15 @@ fn writes_and_unknown_are_bypass() {
     ] {
         assert_eq!(classify(&v(&cmd)), Class::Bypass, "{cmd:?}");
     }
+}
+
+#[test]
+fn rev_args_are_not_vouchable_in_m1() {
+    // `git tag v1` writes; `git diff HEAD~1` reads but M1 can't tell operand kinds apart
+    assert_eq!(classify(&v(&["git", "diff", "HEAD~1"])), Class::Bypass);
+    assert_eq!(classify(&v(&["git", "tag", "-l", "v1.0"])), Class::Bypass);
+    assert_eq!(classify(&v(&["git", "log", "-5"])), Class::Memoizable, "-N count is safe");
+    assert_eq!(classify(&v(&["git", "branch"])), Class::Memoizable, "bare lister");
 }
 
 #[test]

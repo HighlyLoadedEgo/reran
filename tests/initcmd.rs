@@ -18,12 +18,12 @@ fn fresh_settings_get_both_hooks() {
     assert_eq!(pre[0]["hooks"][0]["type"], "command");
     assert_eq!(
         pre[0]["hooks"][0]["command"],
-        "/usr/local/bin/reran hook pre --event pre"
+        "/usr/local/bin/reran hook --event pre"
     );
     let post = &v["hooks"]["PostToolUse"];
     assert_eq!(
         post[0]["hooks"][0]["command"],
-        "/usr/local/bin/reran hook post --event post"
+        "/usr/local/bin/reran hook --event post"
     );
 }
 

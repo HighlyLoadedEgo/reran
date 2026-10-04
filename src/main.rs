@@ -45,6 +45,7 @@ fn run_gain() -> i32 {
             };
             println!("reran gain");
             println!("  hits {hits} · misses {misses} · bypass {bypass} · uncached failures {fails}");
+            println!("  no exit code {} (payload had no confirmable exit — not cached)", s.no_exit_code);
             println!(
                 "  tokens saved: {} (counted only on replaced output, bytes/4)",
                 format_number(s.tokens_saved)

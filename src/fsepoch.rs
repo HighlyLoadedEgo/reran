@@ -39,9 +39,12 @@ pub fn latest_mtime(root: &Path, skip: &[&str], visit_cap: usize) -> Option<Syst
                 }
                 worklist.push(path);
             } else if meta.is_file() {
-                let mtime = meta.modified().ok()?;
-                if newest.is_none_or(|n| mtime > n) {
-                    newest = Some(mtime);
+                // one unreadable mtime must not abort the whole scan (F6):
+                // skipping the file degrades locally; `?` here degraded globally
+                if let Ok(mtime) = meta.modified() {
+                    if newest.is_none_or(|n| mtime > n) {
+                        newest = Some(mtime);
+                    }
                 }
             }
         }

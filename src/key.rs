@@ -61,6 +61,17 @@ pub fn env_allowlist(argv0: &str) -> Vec<(String, String)> {
     out
 }
 
+/// env_allowlist for a possibly env-prefixed command (`FOO=bar git status`):
+/// selection must key on the real command word, not the assignment.
+pub fn env_allowlist_for(argv: &[String]) -> Vec<(String, String)> {
+    let first = argv
+        .iter()
+        .find(|a| !(a.contains('=') && !a.starts_with('-')))
+        .map(String::as_str)
+        .unwrap_or("");
+    env_allowlist(first)
+}
+
 pub fn build_key(ctx: &CallCtx, env: &[(String, String)]) -> [u8; 32] {
     let canonical = serde_json::json!({
         "cwd": ctx.cwd.to_string_lossy(),

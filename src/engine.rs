@@ -1,10 +1,13 @@
 use crate::classify::{classify, Class};
 use crate::digest::{estimate_tokens, line_count, render_hit};
 use crate::fsepoch::{marker_path, fs_epoch};
-use crate::key::{build_key, env_allowlist, uid, CallCtx};
+use crate::key::{build_key, env_allowlist_for, uid, CallCtx};
 use crate::store::Store;
 use std::fs;
 use std::io::Write;
+
+/// Outputs larger than this are never written into the store (F4).
+pub const MAX_CACHED_OUTPUT_BYTES: usize = 262_144; // 256 KiB (F4)
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -24,7 +27,7 @@ fn make_key(store: &Store, argv: &[String], cwd: &Path) -> ([u8; 32], CallCtx) {
         uid: uid(),
         fs_epoch: fs_epoch(store.cache_dir(), cwd),
     };
-    let env = env_allowlist(&argv[0]);
+    let env = env_allowlist_for(argv);
     (build_key(&ctx, &env), ctx)
 }
 
@@ -73,6 +76,10 @@ pub fn record(store: &Store, argv: &[String], cwd: &Path, session: &str, raw: &s
         if let Ok(mut f) = fs::File::create(&marker) {
             let _ = f.write_all(b"write recorded");
         }
+        return;
+    }
+    if raw.len() > MAX_CACHED_OUTPUT_BYTES {
+        let _ = store.record_event("uncached_failure", 0);
         return;
     }
     if exit_code != 0 {
