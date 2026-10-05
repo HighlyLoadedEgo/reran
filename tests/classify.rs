@@ -119,6 +119,18 @@ fn in_token_operators_stay_bypass() {
     assert_eq!(classify(&v(&["grep", "x", "f", "2>&1|head", "-3"])), Class::Bypass);
 }
 
+#[test]
+fn escaped_bre_alternation_is_not_an_operator() {
+    // grep BRE "a\|b" is a literal alternation, not a shell pipe — agents use
+    // it constantly. v1.1 regressed this into bypass; regression pinned here.
+    assert_eq!(
+        classify(&v(&["grep", "-n", "-i", "classif\\|read-only", "docs/specs/x.md"])),
+        Class::Memoizable
+    );
+    assert_eq!(classify(&v(&["grep", "a\\;b", "f"])), Class::Memoizable);
+    assert_eq!(classify(&v(&["grep", "a\\&b", "f"])), Class::Memoizable);
+}
+
 // ── sed: print-to-stdout forms are reads; EVERY in-place form (-i, -i '',
 // -i.bak, -in, --in-place) writes the input file. "-i" prefix catches the
 // glued variants. The sed `w` script-command is a known residual gap (0

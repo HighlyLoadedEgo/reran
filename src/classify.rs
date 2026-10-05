@@ -116,11 +116,15 @@ fn classify_segment(argv: &[String]) -> Class {
         return Class::Bypass;
     }
     // Operators glued inside a token ("2>&1|head") are invisible to
-    // segmentation — refuse rather than misread what will execute.
-    if argv
-        .iter()
-        .any(|a| !is_safe_redirect_token(a) && a.len() > 1 && (a.contains('|') || a.contains(';') || a.contains('&')))
-    {
+    // segmentation — refuse rather than misread what will execute. EXCEPT
+    // backslash-escaped ones: grep BRE patterns like "a\|b" are literals,
+    // not shell operators. Shell operators cannot be both escaped AND active.
+    if argv.iter().any(|a| {
+        !is_safe_redirect_token(a) && a.len() > 1 && {
+            let bare = a.replace("\\|", "").replace("\\;", "").replace("\\&", "");
+            bare.contains('|') || bare.contains(';') || bare.contains('&')
+        }
+    }) {
         return Class::Bypass;
     }
     if cmd == "find" && argv.iter().any(|a| FIND_SIDE_EFFECT_FLAGS.contains(&a.as_str())) {
