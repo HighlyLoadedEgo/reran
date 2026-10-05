@@ -70,8 +70,51 @@ fn mutating_lookalikes_are_bypass() {
     assert_eq!(classify(&v(&["find", ".", "-name", "x", "-delete"])), Class::Bypass);
     assert_eq!(classify(&v(&["find", ".", "-exec", "rm", "{}", ";"])), Class::Bypass);
     assert_eq!(classify(&v(&["find", ".", "-ok", "rm", "{}", ";"])), Class::Bypass);
-    // shell redirects in argv
+    // shell redirects that write files
     assert_eq!(classify(&v(&["echo", "x", ">", "f"])), Class::Bypass);
     assert_eq!(classify(&v(&["grep", "-r", "x", ".", ">", "out.txt"])), Class::Bypass);
-    assert_eq!(classify(&v(&["ls", "2>&1"])), Class::Bypass);
+}
+
+// ── Read-only pipelines: agents compose almost every read into
+// `cmd | head`, `a && echo --- && b`. A pipeline is memoizable when EVERY
+// segment is memoizable — the whole argv string is the cache key, so the
+// composed answer is exact. Any write/unknown segment poisons the pipeline.
+
+#[test]
+fn pipelines_of_reads_are_memoizable() {
+    assert_eq!(
+        classify(&v(&["ls", "/x", "&&", "echo", "---", "&&", "find", "/x", "-type", "d", "|", "head", "-40"])),
+        Class::Memoizable
+    );
+    assert_eq!(classify(&v(&["grep", "-rn", "fn", "src", "|", "head", "-20"])), Class::Memoizable);
+    assert_eq!(classify(&v(&["ls", "/a", ";", "ls", "/b"])), Class::Memoizable);
+}
+
+#[test]
+fn one_write_segment_poisons_the_pipeline() {
+    assert_eq!(classify(&v(&["grep", "x", "f", "|", "tee", "/tmp/out"])), Class::Bypass);
+    assert_eq!(classify(&v(&["ls", "/a", ";", "git", "commit", "-m", "x"])), Class::Bypass);
+}
+
+#[test]
+fn fd_redirects_are_not_writes() {
+    // stderr→stdout and stderr→/dev/null touch no files — agents append
+    // these to nearly every command.
+    assert_eq!(classify(&v(&["grep", "-rn", "fn", "src", "2>&1"])), Class::Memoizable);
+    assert_eq!(classify(&v(&["ls", "/x", "2>/dev/null"])), Class::Memoizable);
+    assert_eq!(classify(&v(&["ls", "/x", "2>/dev/null", "|", "head", "-5"])), Class::Memoizable);
+}
+
+#[test]
+fn file_redirects_still_bypass() {
+    assert_eq!(classify(&v(&["cat", "f", ">", "/tmp/out"])), Class::Bypass);
+    assert_eq!(classify(&v(&["cat", "f", ">>", "/tmp/out"])), Class::Bypass);
+    assert_eq!(classify(&v(&["grep", "x", "f", "2>/tmp/err.log"])), Class::Bypass);
+}
+
+#[test]
+fn in_token_operators_stay_bypass() {
+    // shlex keeps "2>&1|head" as one token when the pipe has no spaces —
+    // segmentation cannot see it, so conservatively bypass.
+    assert_eq!(classify(&v(&["grep", "x", "f", "2>&1|head", "-3"])), Class::Bypass);
 }

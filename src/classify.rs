@@ -61,23 +61,40 @@ fn all_read_flags(args: &[String]) -> bool {
         .all(|a| SAFE_FLAGS.contains(&a.as_str()) || is_count(a))
 }
 
-pub fn classify(argv: &[String]) -> Class {
+/// Operators that split a command into segments we analyze independently.
+const SEGMENT_OPS: &[&str] = &["|", "||", "&&", ";"];
+
+/// fd-only redirects that touch no files. Anything else containing a
+/// redirect operator writes (or reads) a path we cannot vouch for.
+fn is_safe_redirect_token(token: &str) -> bool {
+    matches!(token, "2>&1" | "1>&2" | "2>/dev/null" | "2>>/dev/null")
+}
+
+fn has_unsafe_redirect(argv: &[String]) -> bool {
+    argv.iter()
+        .any(|a| (a.contains('>') || a.contains('<')) && !is_safe_redirect_token(a))
+}
+
+/// Classify one pipe-free segment: every token must be accountably read-only.
+fn classify_segment(argv: &[String]) -> Class {
     let argv = strip_env(argv);
     if argv.is_empty() {
         return Class::Bypass;
     }
     let cmd = argv[0].as_str();
-    if argv.iter().any(|a| a == "&&" || a == "||" || a == ";" || a == "|") {
-        return Class::Bypass; // M1: compound commands not analyzed
+    if has_unsafe_redirect(argv) {
+        return Class::Bypass;
     }
+    // Command substitution is not computable pre-run (bkt#20).
+    if argv.iter().any(|a| a.contains('$') || a.contains('`')) {
+        return Class::Bypass;
+    }
+    // Operators glued inside a token ("2>&1|head") are invisible to
+    // segmentation — refuse rather than misread what will execute.
     if argv
         .iter()
-        .any(|a| a.starts_with('>') || a.starts_with('<') || a.contains(">&"))
+        .any(|a| !is_safe_redirect_token(a) && a.len() > 1 && (a.contains('|') || a.contains(';') || a.contains('&')))
     {
-        return Class::Bypass; // shell redirects write files
-    }
-    // Command substitution is not computable pre-run (bkt#20) — "unchanged" would be a lie.
-    if argv.iter().any(|a| a.contains('$') || a.contains('`')) {
         return Class::Bypass;
     }
     if cmd == "find" && argv.iter().any(|a| FIND_SIDE_EFFECT_FLAGS.contains(&a.as_str())) {
@@ -88,18 +105,35 @@ pub fn classify(argv: &[String]) -> Class {
     }
     if let Some((_, subs)) = READ_SUBCOMMANDS.iter().find(|(name, _)| cmd == *name) {
         match argv.get(1) {
-            // subcommand not in the read list (commit/stash/push/…) or flag-first forms
-            // (`git -C …`) — unanalyzed in M1
             None => return Class::Bypass,
             Some(sub) if !subs.contains(&sub.as_str()) => return Class::Bypass,
             Some(_) => {}
         }
-        // Subcommand is a known reader. Bare form is a pure lister; with args, only
-        // vouchable read-flags pass — `git tag v1` writes, `git tag -l` reads.
         if argv.len() == 2 || all_read_flags(&argv[2..]) {
             return Class::Memoizable;
         }
     }
-    // npm run / cargo test etc. execute project code — never read-only, stay Bypass.
     Class::Bypass
+}
+
+pub fn classify(argv: &[String]) -> Class {
+    let argv = strip_env(argv);
+    if argv.is_empty() {
+        return Class::Bypass;
+    }
+    // Split on top-level segment operators; a pipeline is memoizable only
+    // when every segment is (the cache key is the whole composed argv).
+    let mut segments: Vec<Vec<String>> = vec![Vec::new()];
+    for token in argv {
+        if SEGMENT_OPS.contains(&token.as_str()) {
+            segments.push(Vec::new());
+        } else {
+            segments.last_mut().unwrap().push(token.clone());
+        }
+    }
+    segments
+        .iter()
+        .all(|seg| classify_segment(seg) == Class::Memoizable)
+        .then_some(Class::Memoizable)
+        .unwrap_or(Class::Bypass)
 }

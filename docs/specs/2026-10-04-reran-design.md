@@ -70,6 +70,13 @@ Rust binary `reran` + two thin adapters over one core library:
 1. **Classifier** — pre-execution decision: `memoizable` (read-only, deterministic),
    `extractable` (known grammar, run but digest), `bypass` (write/side-effectful:
    run raw; resets FS marker for its scope). Conservative: unknown → extractable-at-worst.
+   v1.1: **read-only pipelines are memoizable** — agents compose nearly every
+   read (`ls && echo --- && find … | head`). A pipeline is memoizable iff every
+   `|`/`&&`/`;`-separated segment is; the whole composed argv is the cache key.
+   fd-redirects (`2>&1`, `2>/dev/null`) touch no files and are safe; file
+   redirects (`>`, `>>`, `2> path`) stay bypass. Operators glued inside a token
+   (`2>&1|head`, no spaces) are invisible to segmentation → bypass (refuse
+   rather than misread). Any write/unknown segment poisons its pipeline.
 2. **Key-builder** — computes everything the output depends on, BEFORE execution
    (bkt#20 rule: key must be computable pre-run):
    `hash(cwd, argv, resolved interpreter, identity(uid), env-delta of an
