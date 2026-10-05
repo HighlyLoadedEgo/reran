@@ -4,6 +4,8 @@ pub enum Class {
     Bypass,
 }
 
+use std::path::{Path, PathBuf};
+
 /// env assignments like FOO=bar before the command
 fn strip_env<'a>(argv: &'a [String]) -> &'a [String] {
     let n = argv
@@ -156,6 +158,14 @@ fn classify_segment(argv: &[String]) -> Class {
 }
 
 pub fn classify(argv: &[String]) -> Class {
+    classify_ctx(argv, None)
+}
+
+/// cwd-aware classification. `hook_cwd` unlocks `cd DIR && <reads>`: the cd
+/// segment is neutral ONLY when DIR resolves inside the hook's cwd subtree —
+/// fs_epoch scans exactly that subtree, so a cd outside it would read from a
+/// zone no write can invalidate (false "unchanged" risk).
+pub fn classify_ctx(argv: &[String], hook_cwd: Option<&Path>) -> Class {
     let argv = strip_env(argv);
     if argv.is_empty() {
         return Class::Bypass;
@@ -170,9 +180,57 @@ pub fn classify(argv: &[String]) -> Class {
             segments.last_mut().unwrap().push(token.clone());
         }
     }
-    segments
-        .iter()
-        .all(|seg| classify_segment(seg) == Class::Memoizable)
+    let mut classified = 0;
+    for seg in &segments {
+        if seg.first().map(|t| t.as_str()) == Some("cd") {
+            if !cd_target_is_inside(seg, hook_cwd) {
+                return Class::Bypass;
+            }
+            continue; // neutral: produces no output, stays inside the scanned subtree
+        }
+        if classify_segment(seg) != Class::Memoizable {
+            return Class::Bypass;
+        }
+        classified += 1;
+    }
+    (classified > 0)
         .then_some(Class::Memoizable)
-        .unwrap_or(Class::Bypass)
+        .unwrap_or(Class::Bypass) // bare `cd X` caches nothing
+}
+
+fn cd_target_is_inside(seg: &[String], hook_cwd: Option<&Path>) -> bool {
+    let (Some(hc), [_, dir]) = (hook_cwd, seg) else {
+        return false;
+    };
+    let expanded: String = if let Some(rest) = dir.strip_prefix("~/") {
+        match std::env::var("HOME") {
+            Ok(home) => format!("{home}/{rest}"),
+            Err(_) => return false,
+        }
+    } else if dir.as_str() == "~" {
+        match std::env::var("HOME") {
+            Ok(home) => home,
+            Err(_) => return false,
+        }
+    } else {
+        dir.to_string()
+    };
+    let joined = if Path::new(&expanded).is_absolute() {
+        PathBuf::from(&expanded)
+    } else {
+        hc.join(&expanded)
+    };
+    // Lexicographic starts_with is fooled by "..": normalize components first.
+    let mut norm: Vec<std::ffi::OsString> = Vec::new();
+    for comp in joined.components() {
+        match comp {
+            std::path::Component::ParentDir => {
+                norm.pop();
+            }
+            std::path::Component::CurDir => {}
+            c => norm.push(c.as_os_str().to_os_string()),
+        }
+    }
+    let normalized = PathBuf::from(norm.iter().collect::<std::path::PathBuf>());
+    normalized.starts_with(hc)
 }

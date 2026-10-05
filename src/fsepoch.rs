@@ -4,7 +4,12 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// Heavy directories excluded from scans (Review Focus #4: scan must stay in ms).
-pub const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", "dist", ".venv", "__pycache__"];
+/// Test/lint cache dirs are skipped too: their churn must not invalidate reads
+/// (and would make the opt-in test cache hit-never).
+pub const SKIP_DIRS: &[&str] = &[
+    ".git", "node_modules", "target", "dist", ".venv", "__pycache__", ".pytest_cache",
+    ".ruff_cache", ".mypy_cache",
+];
 
 /// Hard cap on visited entries; exceeding it returns None (caller falls back to marker-only).
 pub const VISIT_CAP: usize = 100_000;

@@ -121,10 +121,14 @@ thing reran will never do is hand the agent yesterday's test result.
 - **Extraction grammars** for dynamic output: pytest, cargo test, go test,
   vitest/jest, tsc, curl/JSON → counts, failing test names, exit status. Low
   extraction confidence → raw passthrough.
-- **Agent-shaped reads** (v1.2): read-only pipelines (`ls X && echo --- &&
+- **Agent-shaped reads** (v1.2–v1.3): read-only pipelines (`ls X && echo --- &&
   find Y | head`), fd-redirects (`2>&1`, `2>/dev/null`), `sed -n 'Np'`,
-  pure-stdout text utilities (jq, diff, stat, xxd, …), and `tsc --noEmit`
-  are memoizable — the exact composition agents actually run.
+  pure-stdout text utilities (jq, diff, stat, xxd, …), `tsc --noEmit`, and
+  `cd DIR && <reads>` (when DIR stays inside the scanned subtree) are
+  memoizable — the exact composition agents actually run.
+- **Opt-in test cache**: `reran allow-tests on` lets a project cache pytest /
+  cargo test / npm test outputs. Off by default — tests can be
+  nondeterministic; the flag is your explicit acceptance.
 - **Rewrite-hook tolerant.** Output-optimizer hooks rewrite commands before
   execution (rtk maps `head -5 F` → `rtk read F --max-lines 5` — a different
   verb). reran pins the argv the agent actually asked for to the payload's
@@ -159,6 +163,7 @@ Requires a Rust toolchain (edition 2021). Then wire your harness:
 $ reran init zcode          # or: reran init claude-code
 $ reran gain                # watch savings accumulate
 $ reran explain -- <cmd>    # why would this hit / miss / bypass?
+$ reran allow-tests on      # per-project: cache test outputs too (opt-in)
 ```
 
 `init` is idempotent and preserves existing hooks. Removing reran = deleting

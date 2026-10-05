@@ -213,3 +213,33 @@ fn tsc_writing_forms_are_bypass() {
     assert_eq!(classify(&v(&["tsc", "--incremental", "--noEmit"])), Class::Bypass);
     assert_eq!(classify(&v(&["tsc", "--build"])), Class::Bypass);
 }
+
+// ── v1.3: cd segments are neutral when the target resolves inside the hook
+// cwd subtree (fs_epoch scans exactly that subtree). Bare `cd` caches nothing.
+
+use reran::classify::classify_ctx;
+use std::path::Path;
+
+#[test]
+fn cd_inside_hook_cwd_is_neutral() {
+    let cls = classify_ctx(&v(&["cd", "/tmp/x-reran/sub", "&&", "ls", "-la"]), Some(Path::new("/tmp/x-reran")));
+    assert_eq!(cls, Class::Memoizable);
+    let rel = classify_ctx(&v(&["cd", "sub", "&&", "git", "status"]), Some(Path::new("/tmp/x-reran")));
+    assert_eq!(rel, Class::Memoizable);
+}
+
+#[test]
+fn cd_outside_hook_cwd_bypasses() {
+    let cls = classify_ctx(&v(&["cd", "/Users", "&&", "ls"]), Some(Path::new("/tmp/x-reran")));
+    assert_eq!(cls, Class::Bypass);
+    let up = classify_ctx(&v(&["cd", "../evil", "&&", "ls"]), Some(Path::new("/tmp/x-reran")));
+    assert_eq!(up, Class::Bypass, ".. must not survive normalization");
+}
+
+#[test]
+fn bare_cd_caches_nothing() {
+    let cls = classify_ctx(&v(&["cd", "/tmp/x-reran"]), Some(Path::new("/tmp/x-reran")));
+    assert_eq!(cls, Class::Bypass);
+    let no_cwd = classify_ctx(&v(&["cd", "/tmp", "&&", "ls"]), None);
+    assert_eq!(no_cwd, Class::Bypass, "without cwd context cd is refused");
+}

@@ -1,4 +1,4 @@
-use crate::classify::{classify, Class};
+use crate::classify::{classify_ctx, Class};
 use crate::digest::{estimate_tokens, line_count, render_hit};
 use crate::fsepoch::{marker_path, fs_epoch};
 use crate::key::{build_key, env_allowlist_for, uid, CallCtx};
@@ -8,9 +8,44 @@ use std::io::Write;
 
 /// Outputs larger than this are never written into the store (F4).
 pub const MAX_CACHED_OUTPUT_BYTES: usize = 262_144; // 256 KiB (F4)
+
+/// Test commands are cached ONLY after an explicit per-cwd opt-in
+/// (`reran allow-tests on`): tests may be nondeterministic, so the default
+/// is never.
+pub fn is_test_command(argv: &[String]) -> bool {
+    match argv.first().map(|s| s.as_str()) {
+        Some("pytest") => true,
+        Some("python") | Some("python3") => {
+            argv.get(1).map(|s| s.as_str()) == Some("-m")
+                && argv.get(2).map(|s| s.as_str()) == Some("pytest")
+        }
+        Some("uv") => argv.get(1).map(|s| s.as_str()) == Some("run")
+            && argv.get(2).map(|s| s.as_str()) == Some("pytest"),
+        Some("cargo") => argv.get(1).map(|s| s.as_str()) == Some("test"),
+        Some("npm") => argv.get(1).map(|s| s.as_str()) == Some("test"),
+        Some("npx") => matches!(argv.get(1).map(|s| s.as_str()), Some("jest") | Some("vitest")),
+        _ => false,
+    }
+}
+
+fn tests_allowed(store: &Store, cwd: &Path) -> bool {
+    crate::fsepoch::marker_path(store.cache_dir(), cwd)
+        .with_extension("allow-tests")
+        .exists()
+}
+
+/// Effective classification: classifier verdict, plus the opt-in test-cache
+/// upgrade (a flagged project may cache its test commands).
+fn class_of(store: &Store, argv: &[String], cwd: &Path) -> Class {
+    let base = classify_ctx(argv, Some(cwd));
+    if base == Class::Bypass && tests_allowed(store, cwd) && is_test_command(argv) {
+        return Class::Memoizable;
+    }
+    base
+}
 use std::path::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     /// This session previously saw the output of this exact call.
     Hit { digest: String },
@@ -35,7 +70,7 @@ pub fn evaluate(store: &Store, argv: &[String], cwd: &Path, session: &str) -> Ou
     if argv.is_empty() {
         return Outcome::Bypass;
     }
-    if classify(argv) == Class::Bypass {
+    if class_of(store, argv, cwd) == Class::Bypass {
         let _ = store.record_event("bypass", 0, &label_for(argv));
         return Outcome::Bypass;
     }
@@ -67,7 +102,7 @@ pub fn record(store: &Store, argv: &[String], cwd: &Path, session: &str, raw: &s
     if argv.is_empty() {
         return;
     }
-    if classify(argv) == Class::Bypass {
+    if class_of(store, argv, cwd) == Class::Bypass {
         // touch the cwd marker ⇒ every later evaluate sees a bumped epoch (spec §4.2)
         let marker = marker_path(store.cache_dir(), cwd);
         if let Some(parent) = marker.parent() {
@@ -126,7 +161,7 @@ pub fn explain_line(store: &Store, argv: &[String], cwd: &Path, session: &str) -
     if argv.is_empty() {
         return "empty command".into();
     }
-    let class = classify(argv);
+    let class = class_of(store, argv, cwd);
     if class == Class::Bypass {
         return format!("bypass: write/unknown command ({}), runs raw every time", argv.join(" "));
     }

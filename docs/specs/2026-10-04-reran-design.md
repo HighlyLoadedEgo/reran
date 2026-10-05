@@ -84,6 +84,16 @@ Rust binary `reran` + two thin adapters over one core library:
    utilities join the whitelist (jq, cut, uniq, wc, diff, stat, realpath,
    dirname, basename, column, xxd, checksums, seq, base64, tree, …); `sort`
    is deliberately absent (`-o file` writes).
+   v1.3: **`cd DIR && <reads>`** — the cd segment is neutral iff DIR resolves
+   inside the hook cwd subtree (fs_epoch scans exactly that subtree; a cd
+   outside would read from a zone no write can invalidate). Bare `cd` caches
+   nothing; without a cwd context cd is refused.
+   **Opt-in test cache** (`reran allow-tests on`, per-cwd flag file): pytest /
+   `python -m pytest` / `uv run pytest` / `cargo test` / `npm test` / `npx
+   jest|vitest` become memoizable. Default OFF — tests may be
+   nondeterministic; opting in is an explicit per-project decision.
+   `.pytest_cache` / `.ruff_cache` / `.mypy_cache` joined fs-scan skip list:
+   test-cache churn must not invalidate reads.
 2. **Key-builder** — computes everything the output depends on, BEFORE execution
    (bkt#20 rule: key must be computable pre-run):
    `hash(cwd, argv, resolved interpreter, identity(uid), env-delta of an

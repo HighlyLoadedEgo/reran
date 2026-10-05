@@ -28,6 +28,12 @@ enum Cmd {
         #[arg(last = true)]
         command: Vec<String>,
     },
+    /// Opt this cwd into caching test commands (pytest, cargo test, npm test).
+    /// Tests can be nondeterministic — you accept that risk per-project.
+    AllowTests {
+        /// "on" or "off"
+        mode: String,
+    },
 }
 
 fn main() {
@@ -37,8 +43,47 @@ fn main() {
         Cmd::Init { harness } => run_init(&harness),
         Cmd::Gain { history } => run_gain(history),
         Cmd::Explain { command } => run_explain(command),
+        Cmd::AllowTests { mode } => run_allow_tests(&mode),
     };
     std::process::exit(code);
+}
+
+fn run_allow_tests(mode: &str) -> i32 {
+    let enable = match mode {
+        "on" => true,
+        "off" => false,
+        other => {
+            eprintln!("reran allow-tests: expected 'on' or 'off', got {other:?}");
+            return 1;
+        }
+    };
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    match reran::store::Store::open(&reran::store::Store::default_db_path()) {
+        Ok(store) => {
+            let path =
+                reran::fsepoch::marker_path(store.cache_dir(), &cwd).with_extension("allow-tests");
+            let done = if enable {
+                std::fs::write(&path, b"tests opt-in").is_ok()
+            } else {
+                match std::fs::remove_file(&path) {
+                    Ok(_) => true,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+                    Err(_) => false,
+                }
+            };
+            if done {
+                println!("reran allow-tests {}: {}", mode, cwd.display());
+                0
+            } else {
+                eprintln!("reran allow-tests: failed to update flag file");
+                1
+            }
+        }
+        Err(e) => {
+            eprintln!("reran allow-tests: store error: {e}");
+            1
+        }
+    }
 }
 
 fn run_explain(command: Vec<String>) -> i32 {
