@@ -1,15 +1,25 @@
 # reran
 
-> **Your agent already ran that. reran remembers.**
+<div align="center">
+
+**Your agent already ran that. reran remembers.**
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#install)
+[![Version](https://img.shields.io/badge/version-0.1.0--pre--release-yellow.svg)](#status)
 
 Memoization + output-extraction layer for AI coding agents (ZCode, Claude Code,
-OpenCode, any harness with shell hooks). The agent's shell call comes in; reran
-answers either **`unchanged since turn N`** — exact, filesystem-validated,
-session-scoped — or a **compact structured digest**, instead of the raw
-multi-thousand-token dump.
+OpenCode, any harness with shell hooks).
 
-rtk compresses the *first* call. **reran kills the repeats.** Run both: rtk on
-the way out, reran in front of the shell.
+</div>
+
+The agent's shell call comes in; reran answers either **`unchanged since turn N`**
+— exact, filesystem-validated, session-scoped — or a **compact structured
+digest**, instead of the raw multi-thousand-token dump.
+
+**rtk compresses the *first* call. reran kills the repeats.** They compose:
+rtk squeezes the misses, reran stops the repeats from happening at all.
 
 ---
 
@@ -65,21 +75,35 @@ miss: entry exists but this session never saw its output (runs fresh) · memoiza
 A miss costs a few tokens. **A lie costs the agent its correctness** — so reran
 is built to be unable to lie. See the [trust contract](#trust-contract).
 
-And the accountant, from a real development session (dogfood, measured —
-`reran gain` counts only tokens on replaced output):
+## Measured, not promised
+
+`reran gain` counts saved tokens only on replaced output (bytes/4) — no vanity
+math. This is a real report from a live ZCode dogfood session (including
+deliberate repeat benchmarks):
 
 ```console
 $ reran gain
 reran Token Savings
 ════════════════════
-Total commands:    43 (hits 12 · misses 28 · bypass 3 · uncached failures 2)
-Tokens saved:      45,320 (counted only on replaced output, bytes/4)
-Hit rate:          28.6%  ██████░░░░░░░░░░░░░░░░░░
+Total commands:    241 (hits 10 · misses 30 · bypass 195 · uncached failures 0)
+  no exit code 0 · not completed 2 (cancelled/timed out — never cached)
+Tokens saved:      13,618 (counted only on replaced output, bytes/4)
+Hit rate:          29.0%  ███████░░░░░░░░░░░░░░░░░
 
 By command (top 5 by savings)
 ─────────────────────────────
-  1. git status            ×12   38.2K tok
+  1. ls -la /usr/bin         ×1    7.1K tok
+  2. grep -rn fn src tests   ×1    4.1K tok
+  3. git log --stat -15      ×1    1.6K tok
+  4. git log --oneline -30   ×1    25 tok
+  5. whoami                  ×1    0 tok
 ```
+
+Read the honest version of that table: `whoami` hit and saved **zero** — a hit
+on a tiny output saves nothing, because saved = (output − digest) / 4. Savings
+come from *big* outputs *repeated* *while the filesystem stands still*. Write-
+heavy interactive work (tests, builds, commits) is bypass by design — the one
+thing reran will never do is hand the agent yesterday's test result.
 
 ## How it works
 
@@ -97,6 +121,11 @@ By command (top 5 by savings)
 - **Extraction grammars** for dynamic output: pytest, cargo test, go test,
   vitest/jest, tsc, curl/JSON → counts, failing test names, exit status. Low
   extraction confidence → raw passthrough.
+- **Rewrite-hook tolerant.** Output-optimizer hooks rewrite commands before
+  execution (rtk maps `head -5 F` → `rtk read F --max-lines 5` — a different
+  verb). reran pins the argv the agent actually asked for to the payload's
+  toolCallId and caches under *that*, so optimizer + memoizer compose with no
+  configuration. Works with any rewriter, any shape of rewrite.
 - **Honest accounting.** `reran gain` counts tokens saved only on replaced
   output (bytes/4). No vanity math.
 
@@ -152,10 +181,11 @@ two hook lines.
 | M3 | `explain`, `init zcode`, MCP-proxy (hookless harnesses) | 🔶 partial |
 | M4 | npm / brew / cargo publish, reproducible benchmark | ⏳ pending |
 
-82/82 tests green. Caching through ZCode hooks is live and verified end-to-end
+84/84 tests green. Caching through ZCode hooks is live and verified end-to-end
 against real PostToolUse payloads (`exitCode`, `cancelled`, `timedOut`,
-`status` — all honored). Measured dogfood savings: 12.8K tokens across three
-repeated read-only commands in one session.
+`status` — all honored), including coexistence with the rtk-bridge rewrite
+hook, live. Planned next: reproducible session-replay benchmark (M4), MCP
+proxy for hookless harnesses (M3).
 
 ## Design docs
 
