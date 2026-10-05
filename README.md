@@ -131,6 +131,18 @@ $ reran explain -- <cmd>    # why would this hit / miss / bypass?
 `init` is idempotent and preserves existing hooks. Removing reran = deleting
 two hook lines.
 
+### Troubleshooting
+
+- **Changed `hooks` or `plugins` in the harness config? Restart the whole
+  app.** ZCode resolves hooks and plugin registrations at startup only —
+  mid-session config edits silently do nothing (verified 2026-10-05: a
+  PostToolUse hook stayed dead across every tool call until restart, while
+  PreToolUse from the same config block kept firing).
+- **A rewrite hook (e.g. rtk-bridge) wraps commands before execution?**
+  reran strips the `rtk ` wrapper prefix in both hook directions, so the
+  cache key is the original command either way. Bare `rtk` invocations stay
+  bypass (unknown command).
+
 ## Status
 
 | Milestone | Scope | State |
@@ -140,9 +152,10 @@ two hook lines.
 | M3 | `explain`, `init zcode`, MCP-proxy (hookless harnesses) | 🔶 partial |
 | M4 | npm / brew / cargo publish, reproducible benchmark | ⏳ pending |
 
-79/79 tests green. Caching through ZCode hooks is live and verified end-to-end
+82/82 tests green. Caching through ZCode hooks is live and verified end-to-end
 against real PostToolUse payloads (`exitCode`, `cancelled`, `timedOut`,
-`status` — all honored).
+`status` — all honored). Measured dogfood savings: 12.8K tokens across three
+repeated read-only commands in one session.
 
 ## Design docs
 

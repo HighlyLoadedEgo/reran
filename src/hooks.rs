@@ -33,12 +33,25 @@ fn deny_json(digest: &str) -> String {
     .to_string()
 }
 
+/// A rewrite hook (e.g. rtk-bridge, a plugin registered after config hooks)
+/// may replace `git status` with `rtk git status` before execution, so pre
+/// can see the original while post sees the wrapped form — or both orders.
+/// The wrapper prefix is never part of the cache key; bare `rtk` stays whole
+/// (unknown command ⇒ bypass semantics).
+fn unwrap_rewrite_hook(argv: Vec<String>) -> Vec<String> {
+    if argv.len() > 1 && argv[0] == "rtk" {
+        argv[1..].to_vec()
+    } else {
+        argv
+    }
+}
+
 /// PreToolUse: cache hit ⇒ deny-with-digest (the cached answer IS the reason).
 /// ANY failure mode ⇒ "" (allow the command; fail-open, spec §5.6).
 pub fn hook_pre(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String {
     std::panic::catch_unwind(AssertUnwindSafe(|| -> Option<String> {
         let payload: PrePayload = serde_json::from_str(stdin_json).ok()?;
-        let argv = shlex::split(&payload.tool_input.command)?;
+        let argv = unwrap_rewrite_hook(shlex::split(&payload.tool_input.command)?);
         if argv.is_empty() {
             return Some(String::new());
         }
@@ -66,7 +79,7 @@ pub fn hook_pre(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String {
 pub fn hook_post(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String {
     std::panic::catch_unwind(AssertUnwindSafe(|| -> Option<String> {
         let payload: PostPayload = serde_json::from_str(stdin_json).ok()?;
-        let argv = shlex::split(&payload.tool_input.command)?;
+        let argv = unwrap_rewrite_hook(shlex::split(&payload.tool_input.command)?);
         if argv.is_empty() {
             return Some(String::new());
         }

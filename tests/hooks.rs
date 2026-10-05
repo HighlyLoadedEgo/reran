@@ -184,3 +184,33 @@ fn zcode_nonzero_exitcode_is_never_cached() {
     let out = hook_pre(&pre_payload("git status", "s1"), &cwd, Some(&s));
     assert_eq!(out, "");
 }
+
+// ── rtk-bridge coexistence: the plugin rewrites tool_input before execution,
+// so post sees `rtk git status` while pre saw `git status` (config hooks run
+// before plugin hooks). Both hooks must resolve to the SAME key regardless
+// of registration order — the wrapper prefix is never part of the cache key.
+
+#[test]
+fn rtk_wrapper_in_post_caches_under_original_command() {
+    let (_d, s, cwd) = store();
+    hook_post(&zcode_payload("rtk git status", "s1", "On branch main", 0, serde_json::json!({})), &cwd, Some(&s));
+    let out = hook_pre(&pre_payload("git status", "s1"), &cwd, Some(&s));
+    assert!(out.contains("unchanged since turn"), "post with rtk wrapper must cache under original argv: {out}");
+}
+
+#[test]
+fn rtk_wrapper_in_pre_hits_original_entry() {
+    let (_d, s, cwd) = store();
+    hook_post(&zcode_payload("git status", "s1", "On branch main", 0, serde_json::json!({})), &cwd, Some(&s));
+    let out = hook_pre(&pre_payload("rtk git status", "s1"), &cwd, Some(&s));
+    assert!(out.contains("unchanged since turn"), "pre with rtk wrapper must find entry stored under original argv: {out}");
+}
+
+#[test]
+fn bare_rtk_wrapped_write_form_is_still_bypass() {
+    let (_d, s, cwd) = store();
+    // `rtk git commit -m x` unwraps to `git commit …` — write form, never cached.
+    hook_post(&zcode_payload("rtk git commit -m x", "s1", "done", 0, serde_json::json!({})), &cwd, Some(&s));
+    let out = hook_pre(&pre_payload("git commit -m x", "s1"), &cwd, Some(&s));
+    assert_eq!(out, "", "unwrapped write command must stay bypass: {out}");
+}
