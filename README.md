@@ -1,16 +1,18 @@
+<div align="center">
+<img src="docs/assets/banner.png" width="100%" alt="reran — your agent already ran that. reran remembers."/>
+</div>
+
 # reran
 
 <div align="center">
-
-**Your agent already ran that. reran remembers.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#install)
 [![Version](https://img.shields.io/badge/version-0.1.0--pre--release-yellow.svg)](#status)
 
-Memoization + output-extraction layer for AI coding agents (ZCode, Claude Code,
-OpenCode, any harness with shell hooks).
+Memoization + output-extraction layer for AI coding agents
+(ZCode, Claude Code, OpenCode — any harness with shell hooks).
 
 </div>
 
