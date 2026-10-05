@@ -2,8 +2,6 @@
 <img src="docs/assets/banner.png" width="100%" alt="reran — your agent already ran that. reran remembers."/>
 </div>
 
-# reran
-
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
