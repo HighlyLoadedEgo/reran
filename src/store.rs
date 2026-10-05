@@ -68,6 +68,11 @@ impl Store {
                 tokens_saved INTEGER NOT NULL DEFAULT 0,
                 ts           INTEGER NOT NULL,
                 label        TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS pending_calls (
+                call_id    TEXT PRIMARY KEY,
+                argv       TEXT NOT NULL,
+                created_at INTEGER NOT NULL
             );",
         )?;
         // migration for dbs created before the label column (M1 pre-release only)
@@ -78,6 +83,43 @@ impl Store {
     /// Marker/marker-lock root — next to the DB (tests point RERAN-less temp DBs here).
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
+    }
+
+    /// Remember the argv the agent asked to run under this toolCallId, so the
+    /// post hook can cache under the ORIGINAL command even when a rewrite hook
+    /// changed the verb (e.g. rtk: `head -5 F` → `rtk read F --max-lines 5`).
+    /// Entries older than an hour are garbage — a pre/post pair is seconds apart.
+    pub fn record_pending(&self, call_id: &str, argv: &[String]) -> rusqlite::Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let _ = self
+            .conn
+            .execute("DELETE FROM pending_calls WHERE created_at < ?1", params![now - 3600]);
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pending_calls (call_id, argv, created_at) VALUES (?1, ?2, ?3)",
+            params![call_id, serde_json::to_string(argv).unwrap_or_default(), now],
+        )?;
+        Ok(())
+    }
+
+    /// One-shot: take (and delete) the original argv recorded for this call.
+    pub fn take_pending(&self, call_id: &str) -> rusqlite::Result<Option<Vec<String>>> {
+        let argv: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT argv FROM pending_calls WHERE call_id = ?1",
+                params![call_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if argv.is_some() {
+            let _ = self
+                .conn
+                .execute("DELETE FROM pending_calls WHERE call_id = ?1", params![call_id]);
+        }
+        Ok(argv.and_then(|s| serde_json::from_str(&s).ok()))
     }
 
     pub fn get(&self, key: &[u8; 32]) -> rusqlite::Result<Option<Entry>> {

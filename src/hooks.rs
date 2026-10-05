@@ -7,6 +7,8 @@ use std::path::Path;
 struct PrePayload {
     session_id: String,
     tool_input: ToolInput,
+    #[serde(default, alias = "toolCallId", alias = "tool_call_id")]
+    tool_call_id: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -20,6 +22,8 @@ struct PostPayload {
     tool_input: ToolInput,
     #[serde(default)]
     tool_response: serde_json::Value,
+    #[serde(default, alias = "toolCallId", alias = "tool_call_id")]
+    tool_call_id: Option<String>,
 }
 
 fn deny_json(digest: &str) -> String {
@@ -63,6 +67,14 @@ pub fn hook_pre(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String {
                 &owned
             }
         };
+        // A rewrite plugin runs after config hooks and swaps the executed
+        // command (sometimes changing the verb). pre sees the ORIGINAL argv —
+        // pin it to this call so post can cache under what the agent asked for.
+        if let Some(id) = payload.tool_call_id.as_deref() {
+            if !id.is_empty() {
+                let _ = store.record_pending(id, &argv);
+            }
+        }
         match evaluate(store, &argv, cwd, &payload.session_id) {
             Outcome::Hit { digest } => Some(deny_json(&digest)),
             _ => Some(String::new()),
@@ -79,10 +91,7 @@ pub fn hook_pre(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String {
 pub fn hook_post(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String {
     std::panic::catch_unwind(AssertUnwindSafe(|| -> Option<String> {
         let payload: PostPayload = serde_json::from_str(stdin_json).ok()?;
-        let argv = unwrap_rewrite_hook(shlex::split(&payload.tool_input.command)?);
-        if argv.is_empty() {
-            return Some(String::new());
-        }
+        let payload_argv = shlex::split(&payload.tool_input.command)?;
         let owned;
         let store = match store {
             Some(s) => s,
@@ -91,6 +100,16 @@ pub fn hook_post(stdin_json: &str, cwd: &Path, store: Option<&Store>) -> String 
                 &owned
             }
         };
+        // Original argv wins: the toolCallId join recovers what the agent asked
+        // for even when a rewrite hook changed the verb; the prefix strip only
+        // covers the simple `rtk <same-verb>` form (payload without a call id).
+        let argv = match payload.tool_call_id.as_deref().filter(|id| !id.is_empty()) {
+            Some(id) => store.take_pending(id).ok().flatten().unwrap_or_else(|| unwrap_rewrite_hook(payload_argv)),
+            None => unwrap_rewrite_hook(payload_argv),
+        };
+        if argv.is_empty() {
+            return Some(String::new());
+        }
         let output = payload
             .tool_response
             .get("stdout")

@@ -123,6 +123,10 @@ fn post_with_nonzero_exit_never_caches() {
 // trust fields. Cancelled/timedOut/not-completed must NEVER cache even
 // when exitCode == 0 — a cancelled command is not a success (spec §5.2).
 fn zcode_payload(cmd: &str, session: &str, stdout: &str, exit_code: i64, extra: serde_json::Value) -> String {
+    zcode_payload_call(cmd, session, stdout, exit_code, "", extra)
+}
+
+fn zcode_payload_call(cmd: &str, session: &str, stdout: &str, exit_code: i64, call_id: &str, extra: serde_json::Value) -> String {
     let mut resp = serde_json::json!({
         "stdout": stdout,
         "stderr": "",
@@ -136,13 +140,16 @@ fn zcode_payload(cmd: &str, session: &str, stdout: &str, exit_code: i64, extra: 
             dst.insert(k.clone(), v.clone());
         }
     }
-    serde_json::json!({
+    let mut p = serde_json::json!({
         "session_id": session,
         "tool_name": "Bash",
         "tool_input": { "command": cmd },
         "tool_response": resp
-    })
-    .to_string()
+    });
+    if !call_id.is_empty() {
+        p["toolCallId"] = serde_json::json!(call_id);
+    }
+    p.to_string()
 }
 
 #[test]
@@ -213,4 +220,50 @@ fn bare_rtk_wrapped_write_form_is_still_bypass() {
     hook_post(&zcode_payload("rtk git commit -m x", "s1", "done", 0, serde_json::json!({})), &cwd, Some(&s));
     let out = hook_pre(&pre_payload("git commit -m x", "s1"), &cwd, Some(&s));
     assert_eq!(out, "", "unwrapped write command must stay bypass: {out}");
+}
+
+// ── Verb-changing rewrites: rtk maps `head -5 F` to `rtk read F --max-lines 5`
+// (different verb AND args), so prefix-stripping cannot recover the original.
+// pre runs before the rewrite plugin and sees the original argv; it records it
+// under the payload's toolCallId, and post joins on that id — the cache key is
+// always the command the agent actually asked to run.
+
+#[test]
+fn rewritten_verb_form_caches_under_original_via_tool_call_id() {
+    let (_d, s, cwd) = store();
+    let pre_in = serde_json::json!({
+        "session_id": "s1",
+        "tool_name": "Bash",
+        "toolCallId": "call_rw1",
+        "tool_input": { "command": "head -5 /tmp/reran-rw/README.md" }
+    })
+    .to_string();
+    hook_pre(&pre_in, &cwd, Some(&s)); // miss; remembers original argv for call_rw1
+    hook_post(
+        &zcode_payload_call("rtk read /tmp/reran-rw/README.md --max-lines 5", "s1", "body", 0, "call_rw1", serde_json::json!({})),
+        &cwd,
+        Some(&s),
+    );
+    let out = hook_pre(&pre_in, &cwd, Some(&s));
+    assert!(out.contains("unchanged since turn"), "post joined by toolCallId must cache under original argv: {out}");
+}
+
+#[test]
+fn tool_call_id_join_ignores_write_originals() {
+    let (_d, s, cwd) = store();
+    let pre_in = serde_json::json!({
+        "session_id": "s1",
+        "tool_name": "Bash",
+        "toolCallId": "call_rw2",
+        "tool_input": { "command": "git commit -m x" }
+    })
+    .to_string();
+    hook_pre(&pre_in, &cwd, Some(&s));
+    hook_post(
+        &zcode_payload_call("rtk commit -m x", "s1", "done", 0, "call_rw2", serde_json::json!({})),
+        &cwd,
+        Some(&s),
+    );
+    let out = hook_pre(&pre_in, &cwd, Some(&s));
+    assert_eq!(out, "", "toolCallId join must not cache write-class originals: {out}");
 }
