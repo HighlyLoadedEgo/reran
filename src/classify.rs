@@ -41,7 +41,33 @@ const FIND_SIDE_EFFECT_FLAGS: &[&str] = &["-delete", "-exec", "-execdir", "-ok",
 const READ_BARE: &[&str] = &[
     "ls", "cat", "head", "tail", "grep", "rg", "fd", "find", "pwd", "which", "whoami", "wc",
     "file", "tree", "du", "df", "date", "echo", "env", "printenv", "uname", "id",
+    // pure-stdout text utilities (v1.2): no file-writing flag exists in any of
+    // these. sort is DELIBERATELY absent (-o writes); mktemp/patch/tee too.
+    "jq", "cut", "uniq", "diff", "stat", "realpath", "dirname", "basename", "column",
+    "xxd", "sha256sum", "md5", "cksum", "nl", "strings", "base64", "seq", "paste",
+    "join", "comm", "cmp", "iconv", "tac", "rev", "fmt", "fold", "expand",
 ];
+
+/// sed writes only through in-place flags; every glued form starts with "-i"
+/// (-i, -i.bak, -in) or is --in-place. Known residual gap: the `w` script-
+/// command (zero occurrences in mined agent workloads).
+fn sed_is_read_only(argv: &[String]) -> bool {
+    !argv
+        .iter()
+        .any(|a| a.starts_with("-i") || a.starts_with("--in-place"))
+}
+
+/// tsc is cached ONLY in the --noEmit form: plain tsc emits .js, --watch
+/// never exits, --incremental/--build write tsbuildinfo.
+fn tsc_is_read_only(tsc_args: &[String]) -> bool {
+    tsc_args.iter().any(|a| a.as_str() == "--noEmit")
+        && !tsc_args.iter().any(|a| {
+            a.as_str() == "--watch"
+                || a.as_str() == "-w"
+                || a.as_str() == "--incremental"
+                || a.as_str() == "--build"
+        })
+}
 
 /// Arguments we can vouch are read-flags, not operands. A rev or pattern is NOT
 /// vouchable: `git tag v1` writes, `git tag -l v1` reads — M1 only trusts flags.
@@ -99,6 +125,15 @@ fn classify_segment(argv: &[String]) -> Class {
     }
     if cmd == "find" && argv.iter().any(|a| FIND_SIDE_EFFECT_FLAGS.contains(&a.as_str())) {
         return Class::Bypass;
+    }
+    if cmd == "sed" {
+        return if sed_is_read_only(argv) { Class::Memoizable } else { Class::Bypass };
+    }
+    if cmd == "tsc" {
+        return if tsc_is_read_only(&argv[1..]) { Class::Memoizable } else { Class::Bypass };
+    }
+    if cmd == "npx" && argv.get(1).map(|s| s.as_str()) == Some("tsc") {
+        return if tsc_is_read_only(&argv[2..]) { Class::Memoizable } else { Class::Bypass };
     }
     if READ_BARE.contains(&cmd) {
         return Class::Memoizable;

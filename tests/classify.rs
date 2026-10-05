@@ -118,3 +118,86 @@ fn in_token_operators_stay_bypass() {
     // segmentation cannot see it, so conservatively bypass.
     assert_eq!(classify(&v(&["grep", "x", "f", "2>&1|head", "-3"])), Class::Bypass);
 }
+
+// ── sed: print-to-stdout forms are reads; EVERY in-place form (-i, -i '',
+// -i.bak, -in, --in-place) writes the input file. "-i" prefix catches the
+// glued variants. The sed `w` script-command is a known residual gap (0
+// occurrences in mined agent workloads).
+
+#[test]
+fn sed_print_forms_are_memoizable() {
+    assert_eq!(classify(&v(&["sed", "-n", "1,102p", "README.md"])), Class::Memoizable);
+    assert_eq!(classify(&v(&["sed", "s/a/b/", "file"])), Class::Memoizable);
+    assert_eq!(classify(&v(&["sed", "-n", "40,60p", "f", "|", "head", "-10"])), Class::Memoizable);
+}
+
+#[test]
+fn sed_script_with_in_token_semicolon_is_bypass() {
+    // shlex drops the quotes: '85,100p;305,345p' arrives as one token we cannot
+    // distinguish from a top-level ';'. Conservative false-bypass, accepted.
+    assert_eq!(classify(&v(&["sed", "-n", "85,100p;305,345p", "tests/x.py"])), Class::Bypass);
+}
+
+#[test]
+fn sed_in_place_is_bypass() {
+    assert_eq!(classify(&v(&["sed", "-i", "''", "s/a/b/", "f"])), Class::Bypass);
+    assert_eq!(classify(&v(&["sed", "-i.bak", "s/a/b/", "f"])), Class::Bypass);
+    assert_eq!(classify(&v(&["sed", "-in", "s/a/b/", "f"])), Class::Bypass);
+    assert_eq!(classify(&v(&["sed", "--in-place", "s/a/b/", "f"])), Class::Bypass);
+    assert_eq!(classify(&v(&["sed", "-n", "1p", "f", "&&", "sed", "-i", "s/a/b/", "g"])), Class::Bypass);
+}
+
+// ── pure-stdout text utilities: no file-writing flags exist in these
+// (sort is DELIBERATELY absent — sort -o writes). mktemp/patch/tee stay out.
+
+#[test]
+fn text_utils_are_memoizable() {
+    for cmd in [
+        vec!["jq", "-r", ".users[]", "data.json"],
+        vec!["cut", "-d,", "-f1", "csv"],
+        vec!["uniq", "-c"],
+        vec!["wc", "-l", "f"],
+        vec!["diff", "a", "b"],
+        vec!["stat", "f"],
+        vec!["realpath", "f"],
+        vec!["basename", "/a/b"],
+        vec!["column", "-t", "f"],
+        vec!["xxd", "f"],
+        vec!["sha256sum", "f"],
+        vec!["seq", "1", "10"],
+        vec!["nl", "-ba", "f"],
+        vec!["strings", "bin"],
+        vec!["base64", "f"],
+        vec!["tree", "src"],
+    ] {
+        assert_eq!(classify(&v(&cmd)), Class::Memoizable, "{cmd:?}");
+    }
+}
+
+#[test]
+fn sort_is_deliberately_bypass() {
+    // sort -o FILE writes; the flag is indistinguishable from harmless args
+    // without per-flag analysis, so sort stays out of the whitelist.
+    assert_eq!(classify(&v(&["sort", "f"])), Class::Bypass);
+}
+
+// ── tsc: ONLY --noEmit form is cached. Plain tsc emits .js; --watch never
+// exits; --incremental/--build write tsbuildinfo. npx tsc allowed (npx cache
+// writes are outside the correctness contract).
+
+#[test]
+fn tsc_no_emit_is_memoizable() {
+    assert_eq!(classify(&v(&["tsc", "--noEmit"])), Class::Memoizable);
+    assert_eq!(classify(&v(&["tsc", "--noEmit", "-p", "tsconfig.json"])), Class::Memoizable);
+    assert_eq!(classify(&v(&["npx", "tsc", "--noEmit"])), Class::Memoizable);
+}
+
+#[test]
+fn tsc_writing_forms_are_bypass() {
+    assert_eq!(classify(&v(&["tsc"])), Class::Bypass, "plain tsc emits .js");
+    assert_eq!(classify(&v(&["npx", "tsc"])), Class::Bypass);
+    assert_eq!(classify(&v(&["tsc", "--watch"])), Class::Bypass);
+    assert_eq!(classify(&v(&["tsc", "-w", "--noEmit"])), Class::Bypass);
+    assert_eq!(classify(&v(&["tsc", "--incremental", "--noEmit"])), Class::Bypass);
+    assert_eq!(classify(&v(&["tsc", "--build"])), Class::Bypass);
+}

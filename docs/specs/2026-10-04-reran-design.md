@@ -77,6 +77,13 @@ Rust binary `reran` + two thin adapters over one core library:
    redirects (`>`, `>>`, `2> path`) stay bypass. Operators glued inside a token
    (`2>&1|head`, no spaces) are invisible to segmentation → bypass (refuse
    rather than misread). Any write/unknown segment poisons its pipeline.
+   v1.2: **sed** print-to-stdout forms are memoizable — every in-place form
+   (`-i`, glued `-i.bak`/`-in`, `--in-place`) bypasses; the `w` script-command
+   is a known residual gap. **tsc** is memoizable ONLY with `--noEmit` and
+   without `--watch`/`-w`/`--incremental`/`--build`. Pure-stdout text
+   utilities join the whitelist (jq, cut, uniq, wc, diff, stat, realpath,
+   dirname, basename, column, xxd, checksums, seq, base64, tree, …); `sort`
+   is deliberately absent (`-o file` writes).
 2. **Key-builder** — computes everything the output depends on, BEFORE execution
    (bkt#20 rule: key must be computable pre-run):
    `hash(cwd, argv, resolved interpreter, identity(uid), env-delta of an

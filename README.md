@@ -121,6 +121,10 @@ thing reran will never do is hand the agent yesterday's test result.
 - **Extraction grammars** for dynamic output: pytest, cargo test, go test,
   vitest/jest, tsc, curl/JSON → counts, failing test names, exit status. Low
   extraction confidence → raw passthrough.
+- **Agent-shaped reads** (v1.2): read-only pipelines (`ls X && echo --- &&
+  find Y | head`), fd-redirects (`2>&1`, `2>/dev/null`), `sed -n 'Np'`,
+  pure-stdout text utilities (jq, diff, stat, xxd, …), and `tsc --noEmit`
+  are memoizable — the exact composition agents actually run.
 - **Rewrite-hook tolerant.** Output-optimizer hooks rewrite commands before
   execution (rtk maps `head -5 F` → `rtk read F --max-lines 5` — a different
   verb). reran pins the argv the agent actually asked for to the payload's
