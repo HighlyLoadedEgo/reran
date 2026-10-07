@@ -104,12 +104,18 @@ pub fn record(store: &Store, argv: &[String], cwd: &Path, session: &str, raw: &s
     }
     if class_of(store, argv, cwd) == Class::Bypass {
         // touch the cwd marker ⇒ every later evaluate sees a bumped epoch (spec §4.2)
-        let marker = marker_path(store.cache_dir(), cwd);
-        if let Some(parent) = marker.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        if let Ok(mut f) = fs::File::create(&marker) {
-            let _ = f.write_all(b"write recorded");
+        // v1.4: ONLY commands that can plausibly write the subtree. Read-only
+        // diagnostics (gh run list, kubectl get, sleep N; curl …) bumped the
+        // marker every call, starving every hit — one diagnostic between two
+        // identical reads forced a fresh miss.
+        if crate::classify::bumps_fs_marker(argv) {
+            let marker = marker_path(store.cache_dir(), cwd);
+            if let Some(parent) = marker.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Ok(mut f) = fs::File::create(&marker) {
+                let _ = f.write_all(b"write recorded");
+            }
         }
         return;
     }

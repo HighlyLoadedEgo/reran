@@ -94,6 +94,15 @@ Rust binary `reran` + two thin adapters over one core library:
    nondeterministic; opting in is an explicit per-project decision.
    `.pytest_cache` / `.ruff_cache` / `.mypy_cache` joined fs-scan skip list:
    test-cache churn must not invalidate reads.
+   v1.4: **marker bump only for plausible writers.** Bypass commands used to
+   bump the cwd marker unconditionally ("unknown — might write"), and with
+   agents running read-only diagnostics between reads (gh run list, kubectl
+   get, sleep N; curl) the marker churned every second — repeated reads
+   forced fresh misses, hits structurally impossible. bumps_fs_marker():
+   bypass command skips the bump iff EVERY segment is a known non-writer
+   (pure-stdout utilities, sed/tsc read forms, gh/kubectl/helm/sleep/ps/lsof
+   minus gh repo|codespace|extension|auth); redirects, substitution, unknown
+   and project-executing segments bump as before. Omissions only over-bump.
 2. **Key-builder** — computes everything the output depends on, BEFORE execution
    (bkt#20 rule: key must be computable pre-run):
    `hash(cwd, argv, resolved interpreter, identity(uid), env-delta of an

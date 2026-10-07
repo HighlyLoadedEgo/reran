@@ -243,3 +243,31 @@ fn bare_cd_caches_nothing() {
     let no_cwd = classify_ctx(&v(&["cd", "/tmp", "&&", "ls"]), None);
     assert_eq!(no_cwd, Class::Bypass, "without cwd context cd is refused");
 }
+
+// ── v1.4: fs-marker bump only for plausible writers. Read-only diagnostics
+// between two identical reads were forcing fresh misses (marker churn).
+
+use reran::classify::bumps_fs_marker;
+
+#[test]
+fn read_only_diagnostics_do_not_bump() {
+    let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    assert!(!bumps_fs_marker(&v(&["gh", "run", "list", "--limit", "5"])));
+    assert!(!bumps_fs_marker(&v(&["kubectl", "get", "ns", "2>&1"])));
+    assert!(!bumps_fs_marker(&v(&["sleep", "15"])));
+    assert!(!bumps_fs_marker(&v(&["cat", "Dockerfile", ";", "echo", "---", ";", "cat", "compose.yml"])));
+    assert!(!bumps_fs_marker(&v(&["gh", "run", "list", "|", "head", "-8"])));
+}
+
+#[test]
+fn writers_and_unknown_still_bump() {
+    let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    assert!(bumps_fs_marker(&v(&["python3", "-c", "x"])));
+    assert!(bumps_fs_marker(&v(&["git", "commit", "-m", "x"])));
+    assert!(bumps_fs_marker(&v(&["uv", "run", "pytest", "-q"])));
+    assert!(bumps_fs_marker(&v(&["gh", "repo", "clone", "x"])));
+    assert!(bumps_fs_marker(&v(&["curl", "-o", "f", "https://x"])));
+    assert!(bumps_fs_marker(&v(&["docker", "compose", "up", "-d"])));
+    assert!(bumps_fs_marker(&v(&["ls", ">", "out"])));
+    assert!(bumps_fs_marker(&v(&["echo", "$KUBECONFIG"])));
+}

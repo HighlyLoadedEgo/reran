@@ -234,3 +234,67 @@ fn cd_target_is_inside(seg: &[String], hook_cwd: Option<&Path>) -> bool {
     let normalized = PathBuf::from(norm.iter().collect::<std::path::PathBuf>());
     normalized.starts_with(hc)
 }
+
+/// Commands that provably cannot write the cwd subtree: remote/inspection
+/// tools. EVERY bypass segment must be in here for the whole command to skip
+/// the fs-marker bump; anything unknown or project-executing bumps.
+/// Conservative by construction: an omission only over-bumps (status quo),
+/// a wrong inclusion would risk a stale hit — the list is tiny and strict.
+const NON_WRITING_FIRST_TOKENS: &[&str] = &["gh", "kubectl", "helm", "sleep", "ps", "lsof", "tput"];
+
+/// gh subcommands that write the local tree.
+const GH_WRITING: &[&str] = &["repo", "codespace", "extension", "auth"];
+
+fn segment_is_non_writing(argv: &[String]) -> bool {
+    let Some(first) = argv.first().map(|s| s.as_str()) else {
+        return false;
+    };
+    if has_unsafe_redirect(argv) || argv.iter().any(|a| a.contains('$') || a.contains('`')) {
+        return false; // redirection or substitution: out of our sight → bump
+    }
+    if READ_BARE.contains(&first) {
+        return true; // pure-stdout utilities cannot write without a redirect
+    }
+    if first == "sed" {
+        return sed_is_read_only(argv);
+    }
+    if first == "tsc" {
+        return tsc_is_read_only(&argv[1..]);
+    }
+    if !NON_WRITING_FIRST_TOKENS.contains(&first) {
+        return false;
+    }
+    if first == "gh" {
+        // gh repo clone/fork, gh auth login, gh codespace … write locally.
+        if let Some(sub) = argv.get(1).map(|s| s.as_str()) {
+            if GH_WRITING.contains(&sub) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Should this bypass-classified command bump the cwd fs-marker (forcing every
+/// later cache key to change)? Only when it plausibly writes the subtree.
+/// Marker churn from read-only diagnostics (`gh run list`, `kubectl get`,
+/// `sleep N; curl …`) was starving every hit: one diagnostic between two
+/// identical reads forced a fresh miss.
+pub fn bumps_fs_marker(argv: &[String]) -> bool {
+    let argv = strip_env(argv);
+    if argv.is_empty() {
+        return true; // unparseable: conservative
+    }
+    let mut segment: Vec<String> = Vec::new();
+    for token in argv {
+        if SEGMENT_OPS.contains(&token.as_str()) {
+            if !segment_is_non_writing(&segment) {
+                return true;
+            }
+            segment.clear();
+        } else {
+            segment.push(token.clone());
+        }
+    }
+    !segment_is_non_writing(&segment)
+}
